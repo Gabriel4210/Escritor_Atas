@@ -16,7 +16,7 @@ def load_model():
 
     return pipeline(
         "automatic-speech-recognition",
-        model="openai/whisper-medium",
+        model="openai/whisper-small",
         torch_dtype=torch_dtype,
         device=device,
     )
