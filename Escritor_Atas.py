@@ -1,78 +1,85 @@
 import streamlit as st
 import os
 import torch
-import tempfile
-import subprocess
 from transformers import pipeline
-from pydub import AudioSegment
 
-os.environ["PATH"] += os.pathsep + "/usr/bin"
-
+# Configuração inicial do modelo
 @st.cache_resource
 def load_model():
-    # Forçar o uso de CPU para evitar problemas com Torch
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     
     return pipeline(
         "automatic-speech-recognition",
-        model="openai/whisper-medium",
-        device=torch_device,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        model="openai/whisper-large-v3",
+        torch_dtype=torch_dtype,
+        device=device,
     )
 
-def convert_audio(input_path, output_format="wav"):
-    output_path = tempfile.NamedTemporaryFile(suffix=f".{output_format}", delete=False).name
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", input_path,
-        "-ar", "16000",
-        "-ac", "1",
-        "-loglevel", "quiet",
-        output_path
-    ]
-    subprocess.run(cmd, check=True)
-    return output_path
-
 def main():
-    st.title("📝 Gerador Automático de Atas")
+    st.set_page_config(page_title="Gerador de Atas", layout="wide")
     
+    st.title("📝 Gerador Automático de Atas")
+    st.markdown("### Converta áudios de reuniões em atas estruturadas")
+
+    # Upload de arquivo de áudio
     audio_file = st.file_uploader(
         "Carregue seu arquivo de áudio (MP3, WAV, OGG)",
         type=["mp3", "wav", "ogg"]
     )
 
     if audio_file:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_input:
-            tmp_input.write(audio_file.read())
-            input_path = tmp_input.name
+        # Criar diretório para armazenar áudios
+        os.makedirs("audios", exist_ok=True)
+        audio_path = os.path.join("audios", audio_file.name)
         
-        try:
-            # Conversão para WAV
-            converted_path = convert_audio(input_path)
-            
-            # Carregar modelo
-            pipe = load_model()
-            
-            # Processamento
-            with st.spinner("Processando áudio..."):
-                result = pipe(
-                    converted_path,
-                    generate_kwargs={"language": "portuguese"}
-                )
-                
-            st.success("Processamento concluído!")
-            st.write(result["text"])
+        # Salvar arquivo
+        with open(audio_path, "wb") as f:
+            f.write(audio_file.getbuffer())
+        
+        # Carregar modelo
+        pipe = load_model()
+        
+        # Processar áudio
+        with st.spinner("Processando áudio... (Isso pode levar alguns minutos)"):
+            result = pipe(
+                audio_path,
+                generate_kwargs={
+                    "language": "portuguese",
+                    "return_timestamps": True
+                }
+            )
+        
+        # Exibir resultados
+        st.subheader("Transcrição Completa:")
+        st.write(result["text"])
 
-        except subprocess.CalledProcessError as e:
-            st.error(f"Erro na conversão de áudio: {str(e)}")
-        except Exception as e:
-            st.error(f"Erro no processamento: {str(e)}")
-        finally:
-            # Limpeza garantida
-            for path in [input_path, converted_path]:
-                if os.path.exists(path):
-                    os.remove(path)
+        # Gerar ata estruturada (exemplo básico)
+        st.subheader("Ata Estruturada:")
+        structured_text = generate_structured_minutes(result["text"])
+        st.write(structured_text)
+
+        # Botão de download
+        download_filename = f"ata_{os.path.splitext(audio_file.name)[0]}.txt"
+        st.download_button(
+            label="⬇️ Baixar Ata",
+            data=structured_text,
+            file_name=download_filename,
+            mime="text/plain"
+        )
+
+def generate_structured_minutes(text):
+    """Função básica para estruturação da ata (personalize conforme necessidade)"""
+    structure = [
+        "**Ata de Reunião**\n\n",
+        "**Data:** [INSERIR DATA]\n\n",
+        "**Participantes:**\n- [LISTAR PARTICIPANTES]\n\n",
+        "**Pontos Discutidos:**\n",
+        text + "\n\n",
+        "**Decisões Tomadas:**\n- [LISTAR DECISÕES]\n\n",
+        "**Ações Futuras:**\n- [LISTAR AÇÕES]"
+    ]
+    return "\n".join(structure)
 
 if __name__ == "__main__":
     main()
