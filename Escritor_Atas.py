@@ -1,9 +1,23 @@
 import streamlit as st
 import os
 import torch
+import tempfile
 from transformers import pipeline
+from pydub import AudioSegment
 
-# Configuração inicial do modelo
+# Configurações do Streamlit para arquivos grandes
+st.set_page_config(page_title="Gerador de Atas", layout="wide")
+st.markdown("""
+    <style>
+        .reportview-container {
+            margin-top: -2em;
+        }
+        #MainMenu {visibility: hidden;}
+        .stDeployButton {display:none;}
+        footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
 @st.cache_resource
 def load_model():
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -11,75 +25,78 @@ def load_model():
     
     return pipeline(
         "automatic-speech-recognition",
-        model="openai/whisper-large-v3",
+        model="openai/whisper-medium",  # Modelo menor para melhor performance
         torch_dtype=torch_dtype,
         device=device,
     )
 
-def main():
-    st.set_page_config(page_title="Gerador de Atas", layout="wide")
-    
-    st.title("📝 Gerador Automático de Atas")
-    st.markdown("### Converta áudios de reuniões em atas estruturadas")
+def process_large_audio(audio_path, pipe):
+    """Processa o áudio em chunks para evitar estouro de memória"""
+    sound = AudioSegment.from_file(audio_path)
+    chunk_length_ms = 600000  # 10 minutos por chunk
+    chunks = sound[::chunk_length_ms]
 
-    # Upload de arquivo de áudio
+    full_text = ""
+    for i, chunk in enumerate(chunks):
+        with tempfile.NamedTemporaryFile(suffix=".wav") as fp:
+            chunk.export(fp.name, format="wav")
+            result = pipe(
+                fp.name,
+                generate_kwargs={
+                    "language": "portuguese",
+                    "return_timestamps": False
+                }
+            )
+            full_text += result["text"] + "\n"
+            st.info(f"Processado chunk {i+1}/{len(chunks)}")
+    
+    return full_text
+
+def main():
+    st.title("📝 Gerador Automático de Atas")
+    
     audio_file = st.file_uploader(
         "Carregue seu arquivo de áudio (MP3, WAV, OGG)",
         type=["mp3", "wav", "ogg"]
     )
 
     if audio_file:
-        # Criar diretório para armazenar áudios
-        os.makedirs("audios", exist_ok=True)
-        audio_path = os.path.join("audios", audio_file.name)
-        
-        # Salvar arquivo
-        with open(audio_path, "wb") as f:
-            f.write(audio_file.getbuffer())
-        
-        # Carregar modelo
-        pipe = load_model()
-        
-        # Processar áudio
-        with st.spinner("Processando áudio... (Isso pode levar alguns minutos)"):
-            result = pipe(
-                audio_path,
-                generate_kwargs={
-                    "language": "portuguese",
-                    "return_timestamps": True
-                }
-            )
-        
-        # Exibir resultados
-        st.subheader("Transcrição Completa:")
-        st.write(result["text"])
+        with st.spinner("Preparando processamento..."):
+            # Converter para formato WAV 16kHz mono
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+                tmp_file.write(audio_file.read())
+                audio_path = tmp_file.name
+                
+            sound = AudioSegment.from_file(audio_path)
+            sound = sound.set_frame_rate(16000).set_channels(1)
+            converted_path = "converted_audio.wav"
+            sound.export(converted_path, format="wav")
 
-        # Gerar ata estruturada (exemplo básico)
-        st.subheader("Ata Estruturada:")
-        structured_text = generate_structured_minutes(result["text"])
-        st.write(structured_text)
+            pipe = load_model()
+            
+            try:
+                with st.spinner("Processando áudio (pode levar vários minutos)..."):
+                    if audio_file.size > 50 * 1024 * 1024:  # >50MB
+                        text = process_large_audio(converted_path, pipe)
+                    else:
+                        result = pipe(
+                            converted_path,
+                            generate_kwargs={
+                                "language": "portuguese",
+                                "return_timestamps": False
+                            }
+                        )
+                        text = result["text"]
 
-        # Botão de download
-        download_filename = f"ata_{os.path.splitext(audio_file.name)[0]}.txt"
-        st.download_button(
-            label="⬇️ Baixar Ata",
-            data=structured_text,
-            file_name=download_filename,
-            mime="text/plain"
-        )
+                st.success("Processamento concluído!")
+                st.subheader("Ata Gerada:")
+                st.write(text)
 
-def generate_structured_minutes(text):
-    """Função básica para estruturação da ata (personalize conforme necessidade)"""
-    structure = [
-        "**Ata de Reunião**\n\n",
-        "**Data:** [INSERIR DATA]\n\n",
-        "**Participantes:**\n- [LISTAR PARTICIPANTES]\n\n",
-        "**Pontos Discutidos:**\n",
-        text + "\n\n",
-        "**Decisões Tomadas:**\n- [LISTAR DECISÕES]\n\n",
-        "**Ações Futuras:**\n- [LISTAR AÇÕES]"
-    ]
-    return "\n".join(structure)
+            except Exception as e:
+                st.error(f"Erro no processamento: {str(e)}")
+            finally:
+                os.unlink(audio_path)
+                os.unlink(converted_path)
 
 if __name__ == "__main__":
     main()
