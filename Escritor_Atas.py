@@ -6,8 +6,7 @@ import subprocess
 from transformers import pipeline
 from pydub import AudioSegment
 
-# Configuração crítica para o FFmpeg no Streamlit Cloud
-os.environ["PATH"] += os.pathsep + "/usr/bin/ffmpeg"
+os.environ["PATH"] += os.pathsep + "/usr/bin"
 
 @st.cache_resource
 def load_model():
