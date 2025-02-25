@@ -4,7 +4,7 @@ import torch
 from transformers import pipeline
 
 # Carrega e cacheia o modelo
-@st.cache_resource
+#@st.cache_resource
 def load_model():
     # Seleciona o dispositivo e o tipo de dados do tensor
     if torch.cuda.is_available():
