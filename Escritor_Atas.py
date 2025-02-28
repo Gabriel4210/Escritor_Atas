@@ -66,11 +66,11 @@ def main():
         # Processa o áudio
         with st.spinner("Processando áudio... (Isso pode levar alguns minutos)"):
             try:
-                result = model_pipe(
+                result = pipe(
                     audio_path,
                     generate_kwargs={
                         "language": "portuguese",
-                        "beam_size": 5,        # ou "num_beams": 5, conforme a implementação
+                        "num_beams": 5,       
                         "temperature": 0.0,
                         "return_timestamps": True
                         }
