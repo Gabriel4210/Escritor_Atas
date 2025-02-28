@@ -16,7 +16,7 @@ def load_model():
 
     return pipeline(
         "automatic-speech-recognition",
-        model="openai/whisper-tiny",
+        model="openai/whisper-base",
         torch_dtype=torch_dtype,
         device=device,
     )
@@ -66,12 +66,14 @@ def main():
         # Processa o áudio
         with st.spinner("Processando áudio... (Isso pode levar alguns minutos)"):
             try:
-                result = pipe(
+                result = model_pipe(
                     audio_path,
                     generate_kwargs={
                         "language": "portuguese",
+                        "beam_size": 5,        # ou "num_beams": 5, conforme a implementação
+                        "temperature": 0.0,
                         "return_timestamps": True
-                    }
+                        }
                 )
             except Exception as e:
                 st.error(f"Erro ao processar o áudio: {e}")
